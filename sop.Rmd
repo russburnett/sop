@@ -1,0 +1,745 @@
+---
+title: SBST Standard Operating Procedures
+author: Jake Bowers, Paul Testa, Lula Chen, Nate Higgins
+date: '`r format(Sys.Date(), "%B %d, %Y")`'
+bibliography: sop.bib
+fontsize: 10pt
+geometry: margin=1in
+mainfont: "Crimson Text"
+graphics: yes
+header-includes:
+  - \usepackage[T1]{fontenc}
+  - \usepackage{textcomp}
+  - \usepackage{fontspec}
+  - \newfontfamily\themainfont[Ligatures=TeX]{Crimson Text}
+output:
+  html_document:
+    toc: true
+    number_sections: true
+    fig_caption: yes
+    fig_height: 4
+    fig_width: 4
+    code_folding: hide
+  pdf_document:
+    toc: true
+    number_sections: true
+    fig_caption: yes
+    fig_height: 4
+    fig_width: 4
+    latex_engine: xelatex
+    keep_tex: true
+---
+
+This document contains a record of the current standard operating procedure
+(SOP) for the [Social and Behavioral Sciences Team](http://sbst.gov) (also known
+as the [Office of Evaluation Sciences in the General Services
+Administration](http://www.gsa.gov/portal/category/100270).^[This SOP is
+directly inspired by the [Green, Lin and Coppock
+SOP](https://github.com/acoppock/Green-Lab-SOP). We did not directly fork that
+repository at this point although we copy from the ideas there and refer to that
+SOP often.]
+
+A standard operating procedure records decisions that we have made in the
+absence of pre-analysis plans, or in the context of circumstances unforeseen by
+our pre-analysis planning. This document is also provisional or a live document,
+in that it is more a way to record decisions we've taken than a way to advocate
+a particular method as universally best.  We invite comments in the
+[Issues](https://github.com/sbstusa/coredocs/issues) and pull requests for
+contributions.
+
+We aim to make this document broadly user-friendly and useful to people working
+in both policy and academia who are involved in the design and analysis of
+randomized field experiments.
+
+Each section of this document will include if applicable:
+
+1. A description of our approach
+2. A description of a function in R that we use in our approach, including key
+   arguments that must be entered into the function and key values that are
+   outputs from the function.
+3. A general example using simulated data to implement the tool in R (perhaps
+   including some evaluation of the tool as compared to other possible choices).
+4. A specific example from SBST (if applicable) in which we implemented the
+   given procedure.
+
+Throughout the document, we include links to the [Glossary](#glossary) and
+[Appendix](#appendix), to clarify terms or explain tools and procedures in
+more depth.
+
+# Analyze as You Randomize: Our General Principle for Statistical Analysis of Experimental Data
+
+Our general principle in statistical analysis is **analyze as you randomized.**
+This idea, often known as "randomization based" or "design based" inference, was
+proposed by two of the founders of modern statistics (Jerzy Neyman, whose 1923
+paper proposed the use of randomization to learn about what we would currently
+call "average treatment effects" and Ronald A. Fisher, whose 1935 book proposed
+the use of randomization to test hypotheses about what we would currently call
+"treatment effects".) We mention this commitment here because from it follows a
+few differences in our use of common statistical tools. For example, we commonly
+use linear least squares models to estimate average treatment effects but
+we show why we prefer a standard error and associated confidence intervals that
+are not those automatically produced by such procedures [below](#neymanse). We also do not discuss
+any unknown population parameters, because most of the time, we do not have
+samples from populations, but rather either all of the units eligible for the
+intervention by the relevant agency *or* a convenient set of such units. Thus,
+we do not analyze with regard to a random sampling process (which we do not know), but
+rather with regard to a random assignment process (which we **do** know).
+
+
+# Basic Data Features
+
+During re-analysis, we need, at the very least, a data set with one row for each
+observation, one column indicating assignment to treatment arm, and one column
+indicating outcome. If the assignment happened within blocks, or strata, we need
+a column containing column identifiers.
+
+# Randomization
+
+
+## Random Assignment Process
+
+Most of our studies involve complete random assignment --- i.e. random
+assignment in which a fixed number of units are assigned to each condition. The
+following code contrasts coin-flipping style randomization (where the number of
+units in each condition is not guaranteed) with complete randomization.
+
+```{r}
+n <- 10
+set.seed(20161010)
+## Coin flipping does not guarantee half and half treated and control
+treatment1 <- rbinom(10, size = 1, prob = .5)
+## Drawing from an urn or shuffling cards, guarantees half treated and control
+treatment2 <- sample(rep(c(1, 0), n / 2))
+table(treatment1)
+table(treatment2)
+```
+
+## Randomization assessment
+
+To assess the performance of the randomization procedure, if we have covariates,
+we test the hypothesis that the treatment-vs-control differences, or differences
+across treatment arms, in covariates is congruent with randomization. In the
+absence of covariates, we assess whether the number of units assigned to each
+arm (conditional on other design features, such as blocking or stratification)
+are consistent with the claimed random assignment.
+
+Here is an example with a binary treatment and a continuous outcome and 10
+covariates. In this case we use the $d^2$ omnibus balance test `xBalance` in
+the package `RItools` [see @hansen_covariate_2008 and @bowers_ritools_2016].  A $p$-value less
+than .05 on that test triggers extra scrutiny of how the randomization was
+conducted and how the data were recorded by the agency.
+
+```{r}
+library(RItools)
+```
+
+
+# Analyses
+
+We organize our discussion of analysis tactics by design of the study. Different
+study designs require different analyses. At the same time there are a few
+general tactics that we use to pursue the strategy of transparent, valid, and
+statistically precise statements about the results of our experiments.
+
+Our experiments can be designed with randomization within blocks or without
+blocks and/or with randomization to clusters of individuals or to individuals
+themselves directly and/or randomization can be sequential or fixed in time.
+Whether experimental intervention was randomly assigned within blocks or to
+clusters will guide our analysis choices. (We may also make some specific
+choices depending on the nature of the measured outcome --- a binary outcome, a
+symmetrically distributed continuous outcome, and a heavily skewed continuous
+outcome, each might require some different approaches within the blocked/not
+blocked and clustered/not clustered designs.  
+
+In our studies, we often want to know
+ 1. If our experiment has any effect at all.
+ 2. The magnitude of any detectable effect.
+ 3. The precision of our estimate of an effect.
+
+Each procedure below describes testing for no effect, estimating an effect, and
+finding standard errors and confidence intervals for different categories of
+experiments.
+
+## Block-randomized trials
+
+Block-randomized trials occur when subjects are split into blocks or strata and
+random assignment occurs within each group.  We use this procedure when we want
+to ensure that random assignment occurs, but evenly distributed according to a
+certain trait.  For example, we may want equal numbers of veterans and
+non-veterans assigned to treatment and control.  If we have complete random
+assignment, it is likely that there proportion of veterans assigned treatment
+will not be the same as the proportion of non-veterans receiving treatment.
+However, if we block the group on military status, and randomly assign treatment
+and control within each group, we can then ensure that equal proportions (or
+numbers) or veterans and non-veterans receive the treatment and control.
+
+
+### Cochran-Mantel-Haenszel (CMH) test for K X 2 X 2 tables
+
+We use the CMH test as a test of no effect for block-randomized trials with
+binary outcomes.^[Binary outcomes implies that there are only two outcomes for
+an experiment, and we have recorded one or the other.  Usually, we use indicator
+variables (0, 1) to record these outcomes.]  Because the blocks or strata are
+important to the experiment and outcomes, we want to keep the outcomes for each
+strata in tact rather than pooling the outcomes together.  Since we repeat the
+same experiment across each stratum, the CMH test tells us if the odds
+ratio in the experiments indicate that there is an association
+between outcomes and treatment/control across strata [@cochran_methods_1954;@mantel_statistical_1959].
+
+To set up the CMH test, we need *k* sets of 2x2 contingency tables.  Suppose the
+table below represents outcomes from stratum *i*:
+
+Assignment| Response  | No response | Total
+--------- |---------- |----------   |----------
+Treatment | A         | B           | A+B
+Control   | C         | D           | C+D
+Total     | A+C       | B+D         | A+B+C+D = T
+
+The CMH test statistic compares the sum of squared deviation between observed
+and expected outcomes of an experiment within one stratum to the variance of
+those outcomes, conditional on marginal totals.
+
+\[CMH = \frac{\sum_{i=1}^{k} (A_{i} -
+\mathrm{E}[{A_{i}}])}{\sum{\mathrm{VAR}[{A_i}]}}\]
+
+where \[\mathrm{E}[A_{i}] =  \frac{(A_i+B_i)(A_i+C_i)}{T_i}\]
+
+and \[\mathrm{VAR}[A_{i}] =
+\frac{(A_i+B_i)(A_i+C_i)(B_i+D_i)(C_i+D_i)}{{T_i}^2(T_i-1)}\]
+
+In large enough samples, if there are no associations between Treatment and
+Reponse cross strata, we would expect to see an odds ratio which is equal to 1,
+and this CMH-test statistic has a $\chi^2$ distribution with degrees of freedom
+= 1.
+
+The odds ratio in this scenario is the combined weighted odds ratio of each two-armed trial with binary outcomes within one block or stratum.
+
+The odds ratio for the stratum is
+
+\[\widehat{OR} = \frac{\frac{A}{B}{\frac{C}{D}}} = \frac{AD}{BC}\]
+
+With many strata, we can find a common odds ratio
+
+\[\widehat{OR}_{CMH} = \frac{\sum_{i=1}^{k}
+\frac{A_{i}D_{i}}{T_{i}}}{\sum_{i=1}^{k}{B_{i}C_{i}}{T_{i}}}\]
+
+We are adding the odds ratios of each stratum and weighing it by the total in
+that stratum.  $\widehat{OR}_{CMH} > 1$ offers us a summary statistic where, we
+suspect that there may be an association between the outcome and treatment
+across all strata and the CMH test statistic will be large.  If
+$\widehat{OR}_{CMH} = 1$, then this supports the null hypothesis that there is
+no association between treatment and outcome and the CMH test statistic will
+small.
+
+We can also use the CMH test to compare odds ratios between experiments, rather
+than compare against the null that the odds ratio = 1.
+
+Before proceeding to the test, we first verify that the data is prepared and
+ready for analysis as discussed in [Data Preparation](#dataprep).  We must also
+have the data set up in 2x2 contingency tables.
+
+#### Cochran-Mantel-Haenszel test - General example with R
+
+The following code offers a general example to estimate a
+Cochran-Mantel-Haenszel test.  Suppose that we have 3 strata (1, 2, 3) to which
+we randomly assign treatment and control within each strata.  The individuals
+that receive the treatment are Group A, and the individuals that receive the
+control are Group B.  We want to verify that treatment does have an effect and
+the difference in proportions are consistent between the experiments.
+
+We simulate outcomes from a normal distribution with mean = 50 and standard
+deviation = 20. Since our example is simulated and outcomes are drawn from the
+same distribution, we should expect to see no difference in proportions between
+Group A and Group B, and no difference across the 3 strata.
+
+```{r}
+## 1. Make random data frame with 3 strata, treatment groups A and B per
+##    strata, and distribution of outcomes with mean = 50 and sd = 20
+set.seed(12)
+df <- data.frame(matrix(round(rnorm(150, mean = 50, sd = 20), 0), nrow = 50))
+colnames(df) <- c("1", "2", "3")
+```
+
+### Difference in Proportions test
+
+#### Difference in Proportions - General example with R
+
+The following code offers a general example to estimate a difference in
+proportions test.  Suppose that we have randomly assigned treatment and control
+to 100 individuals.  We also have dichotomous outcomes (0,1) where 0 is considered "failure" and 1 is considered "success." We are interested in the proportion of successes in each group, meaning the number of times each group observes outcome 1 instead of 0.
+
+We simulate 100 outcomes, randomly attributing fifty 0's and fifty 1's among the 100 individuals. Since our example is simulated and outcomes are drawn randomly, we should expect to see no difference in proportions between Group A and Group B.
+
+In our results, we may report the test statistic, the p-value, and the
+[confidence interval](#seci).
+
+```{r, eval = TRUE}
+## 1. Make random data frame with assignment and outcome for 100 subjects
+n <- 100
+assign <- sample(rep(c(0,1), n/2))
+outcome <- sample(rep(c(0,1), n/2))
+df<-as.data.frame(cbind(assign, outcome))
+
+## 2. Find proportion of outcomes that are 1 (successes) and
+##    0 (failures) in both groups
+mat <- matrix(NA, 2, 2)
+rownames(mat) <- c("Treatment", "Control")
+colnames(mat) <- c("Success", "Failure")
+mat[1, 1] <- sum(df$assign[df$outcome==1]==1)
+mat[1, 2] <- sum(df$assign[df$outcome==0]==1)
+mat[2, 1] <- sum(df$assign[df$outcome==1]==0)
+mat[2, 2] <- sum(df$assign[df$outcome==0]==0)
+
+## 3. Estimate
+matpt<-prop.test(mat)
+
+## 4. Results show a chi-squared close to 0 and a p-value which equals 1,
+##   indicating that the two proportions are likely the same.
+##    Because we created the data at the beginning, we know that the two proportions are the same.
+matpt$statistic
+matpt$p.value
+matpt$estimate
+```
+
+#### Difference in Proportions - Standard Errors
+When we have an experiment that includes treatment and control with binary outcomes and we are estimating the ATE, the standard errors in the difference in proportions test are the same as the standard errors in a regular OLS regression, which are also the the same as the Neyman standard errors.{#neymanse}  
+
+Difference of proportions standard errors are estimated with the following equation:
+
+\[\widehat{SE}_{prop} = \sqrt{\frac{p_{1}(1-p_{1})}{n_{1}}+\frac{p_{2}(1-p_{2})}{n_{2}}}\]
+
+where we can think of $n_1$ as the group assigned treatment, $n_2$ as the group assigned control, $p_1$ as the proportion of "successes" in the group assigned treatment, and $p_2$ as the proportion of "successes" in the group assigned control. 
+
+We can compare this with the Neyman standard errors equation, see @lin_agnostic_2013:
+
+\[\widehat{SE}_{Neyman} = \sqrt{\frac{VAR(Y_{c})}{n_1}+\frac{VAR(Y_{c})}{n_2}}\]
+
+where $Y_c$ is outcomes of control and $Y_t$ is ountcomes of treatment; we use the variance of each population to find the Neyman standard error. 
+
+We can also compare both difference in proportions and Neyman standard errors to OLS standard errors, written in matrix form:
+
+\[\widehat{SE}_{OLS} = \sqrt{VAR(\widehat{ATE})(X'X)^{-1}}\]
+
+where $VAR(\widehat{ATE})$ is the variance of the estimated ATE coefficient and $(X'X)^{-1}$ is a scalar since X is a vector. 
+
+When no additional covariates and only binary outcomes are in the model, all three versions produce the same standard errors, as depicted in the code below.  
+
+```{r, eval = TRUE, echo = TRUE, results = 'hide'} 
+## 1. Use simulated data
+matpt<-prop.test(mat)
+
+## 2. Find SE for difference of proportions.
+p1 <- matpt$estimate["prop 1"]
+p2 <- matpt$estimate["prop 2"]
+se1 <- (p1*(1-p1))/(n/2)
+se2 <- (p2*(1-p2))/(n/2)
+se_prop <- round(sqrt(se1 + se2), 2)
+
+## 3. Find Neyman SE
+varc_s <- var(df$outcome[df$assign == 0])
+vart_s <- var(df$outcome[df$assign == 1])
+se_neyman <- round(sqrt((vart_s/(n/2)) + (varc_s/(n/2))), 2)
+
+## 4. Find OLS SE
+se_ols <- round(coef(summary(lm(outcome~assign)))["assign", "Std. Error"], 2)
+```
+
+```{r, eval = TRUE, echo = TRUE}
+## 5. Show SEs
+se_compare <- as.data.frame(cbind(se_prop, se_neyman, se_ols))
+rownames(se_compare) <- "SE(ATE)"
+colnames(se_compare) <- c("diff in prop", "neyman", "ols")
+print(se_compare)
+```
+
+
+
+## Cluster-randomized trials
+
+# Standard Errors and Confidence Intervals{#seci}
+
+In our analyses, we report p-values, standard errors, and confidence intervals
+for all of our point estimates.
+
+We use a one-tailed hypothesis test if we want to determine that the effect of
+an experiment goes in one direction, for example, that the effect of treatment
+is larger than control.  We use a two-tailed hypothesis test if want to
+determine that any effect occurred, for example that the effect of treatment is
+larger and/or smaller than control.  Two-tailed hypothesis tests emcompass
+one-tailed hypothesis tests. P-values in two-tailed hypothesis tests give the
+probability of having a test statistic that equal to or greater than the
+absolute value of the one we observe.
+
+## Standard Errors and Confidence Intervals
+
+Our current practice in calculating confidence intervals for estimates of
+average treatment effects follows @lin_agnostic_2013 and @gerber_field_2012, @dunning_natural_2012, and the appendix in @freedman_statistics_2007 where a
+conservative estimator of the standard error on the average treatment effect
+involves the sample variances of the outcomes in both the treated and control
+groups:
+
+$$ \sqrt{ \widehat{Var}(Y|Z = 1)/I(Z == 1) + \widehat{Var}(Y|Z = 0)/I(Z == 0) } $$
+
+@lin_agnostic_2013 shows that this estimator is the same as the HC2 estimator
+implemented in common robust standard error packages. [MORE ON THIS]
+
+###  What is a standard error?
+[IMPROVE THIS NEXT SECTION]
+
+How would an estimate of the average treatment effect vary if we repeated the
+experiment on the same group of villages? The standard error of an estimate of
+the average treatment effect is one answer to this question. Below, we simulate
+a simple, individual-level experiment to develop intuition about what a standard
+error is.^[See http://egap.org/methods-guides/10-types-treatment-effect-you-should-know-about
+for a demonstration that the difference of means in the observed treatment and
+control groups is an unbiased estimator of the average treatment effect itself
+and what it means to be unbiased.]
+
+```{r}
+N <- 100
+tau <- .25
+y0 <- rnorm(N) ## potential outcomes to control
+y1 <- y0 + tau + rnorm(N)   ## potential outcomes to treatment are a simple function of y0
+Zrealized <- sample(rep(c(0,1), N / 2)) ## Assign treatment to half
+
+simEstAte <- function(Z,y1,y0){
+  ## A function to re-assign treatment and recalculate the difference of means
+  Znew <- sample(Z)
+  Y <- Znew * y1 + (1-Znew) * y0
+  estate <- mean(Y[Znew == 1]) - mean(Y[Znew == 0])
+  return(estate)
+}
+
+set.seed(12345)
+simpleResults <- replicate(100000,simEstAte(Z = Zrealized,y1 = y1,y0 = y0))
+## The standard error of the estimate of the ATE.
+sd(simpleResults)
+```
+
+Although this preceding standard error is intuitive (it is merely the standard
+deviation of the distribution arising from repeating the experiment), more
+statistics-savvy readers will recognize closed-form expressions for the standard
+error like the following [see @gerber_field_2012 and @dunning_natural_2012 for
+easy to read explanations and derivations of the design-based standard error of
+the simple estimator of the average treatment effect). If we write T as the set
+of all treated units and C as the set of all non treated units, we might write
+
+$$\widehat{Var}(\hat{T})  =  s^2(Y_{i,i \in T})/m+s^2(Y_{i,i \in C}/(n-m))$$
+
+where $m$ is the number assigned to treatment and $s^2(x) = (1/n-1)\sum^n_{i =
+1}(x_i-\bar{x})^2$. Here we compare the results of the simulation to this most
+common standard error as well as to the "true" version (which requires that we
+know the potential outcomes so as to calculate their covariance):
+
+```{r, error = FALSE, warning = FALSE, message = FALSE}
+## True SE (Dunning Chap 6, Gerber and Green Chap 3 and Freedman, Pisani and Purves A-32)
+## including the covariance between the potential outcomes
+
+V <- var(cbind(y0,y1))
+varc <- V[1,1]
+vart <- V[2,2]
+covtc <- V[1,2]
+n <- sum(Zrealized)
+m <- N-n
+
+varestATE <- ((N-n)/(N-1)) * (vart/n) + ((N-m)/(N-1)) * (varc/m) + (2/(N-1)) * covtc
+seEstATE <- sqrt(varestATE)
+
+## And the finite sample *feasible* version (where we do not observe the potential outcomes) and so we do not have the covariance
+Yobs <- Zrealized*y1+(1-Zrealized)*y0
+varYc <- var(Yobs[Zrealized == 0])
+varYt <- var(Yobs[Zrealized == 1])
+fvarestATE <- (N/(N-1)) * ( (varYt/n) + (varYc/m) )
+estSEEstATE <- sqrt(fvarestATE)
+
+##  Here we use the HC2 standard error --- which Lin 2013 shows is the randomization justified SE for OLS.
+library(sandwich)
+library(lmtest)
+
+lm1 <- lm(Yobs~Zrealized)
+
+## Other SEs
+iidSE <-  sqrt(diag(vcov(lm1)))[["Zrealized"]]
+
+## Worth noting that if we had covariates in the model we would want this one (which is identical to the previous one without covariates).
+NeymanSE <- sqrt(diag(vcovHC(lm1,type = "HC2")))[["Zrealized"]]
+
+c(simSE = sd(simpleResults),
+  feasibleSE = estSEEstATE,
+  trueSE = seEstATE,
+  olsIIDSE = iidSE,
+  NeymanDesignSE = NeymanSE)
+```
+
+We see that the feasible SE (also known as the conservative SE) and the true SE
+are the same to 3 digits here, where as the OLS versions are a bit smaller and
+the simulated standard error is also very close. These standard errors will
+diverge when covariates are introduced into the linear model. And, of course,
+the true version is rarely calculable since we don't have access to the true
+potential outcomes.
+
+
+## Trials with Multiple Arms
+
+Often we are interested in testing the effects of multiple interventions. For
+example, instead of assessing whether emailing employees increases enrollment in
+a particular program, we may also wish to know whether *certain types* of emails
+are more effective than others. Studies with multiple types of interventions are
+said to have multiple arms, with each arm corresponding to assignment to a
+particular treatment condition.
+
+In general our analysis of studies with multiple arms should reflect the fact
+that we are making multiple comparisons for two reasons. First, the family-wise
+error rate of these tests will differ from the individual error rate of single
+test. In short, testing more than one hypothesis increases the chance of making
+a Type I error (i.e. incorrectly rejecting a true null hypothesis).^[Suppose
+instead of testing a single hypothesis at a conventional significance level of
+$\alpha = 0.05$ we tested two hypothesis at $\alpha = 0.05$. The probability of
+retaining both hypotheses is $(1-\alpha)^2 = $ `r .95^2` and the probability of
+rejecting at least one of these hypotheses is $1-(1-\alpha)^2 = $ `r
+1-.95^2`--much higher than our stated significance threshold of $\alpha = 0.05$]
+Second, multiple tests will often be correlated and our tests should recognize
+these relationships (which will penalize the multiple testing less).^[Imagine
+testing two hypotheses with $\alpha = .05$ but the reference distributions of the
+tests were identical: that we, we just by accident ran the same exact code
+twice. In that case, we are really just doing one test and so haven't changed
+our probability of rejecting a true null hypothesis for either test. If the two
+tests were correlated at .99, we would have changed this probability but only
+very slightly since both tests would basically still be the same.]
+
+
+## Adjusting p-values and confidence intervals for multiple comparisons using Tukey HSD in R
+
+To illustrate the benefits of adjusting for multiple comparisons, we will
+analyze a hypothetical study of the effects of different types of email
+communication on program enrollment.
+
+First, we create some simulated data for a study with 1000 participants randomly
+assigned in equal proportions to one of four arms: A baseline email, the
+baseline email plus some framing of enrollment benefits A, the baseline plus
+alternative framing B, and a control "no email" condition. Our outcome, $Y$ is a
+dichotomous indicator of whether someone enrolled in a program which varies
+according to the arm of study a subject is assigned to.
+
+```{r, warning = T, message = T}
+# Set seed for reproducibility
+set.seed(1234)
+
+N <- 1000 # total number of participants
+n <- 250 # participants per arm
+
+# Treatment indicator
+Z <- rep(c("Control", "Base", "A", "B"), n)
+
+# Set factor levels of indicator so control is excluded category
+Z <- factor(Z, levels = c("Control", "Base", "A", "B"))
+
+set.seed(123)
+
+# Generate latent propensity to enroll
+Ystar <- .3 + .092 * (Z == "Base") + .175 * (Z == "A") +
+         .11 * (Z == "B") + rnorm(N, 0, .3)
+# Create dichotomous outcome variable
+Y <- ifelse(Ystar > 0.33, 1, 0)
+# Combine outcome and treatment indicator into dataframe
+dat <- data.frame(Y, Z)
+
+```
+
+
+A naive approach to testing effects in these models, would be to regress the
+outcome on the treatment factor. The coefficients on each level of that
+factor then provide an estimate of the difference in mean enrollment between
+each treatment and the control group. We see that in our example, all three
+treatments appear to increase enrollment, although only marginally so for email
+B.
+
+
+```{r}
+lm1 <- lm(Y~Z, dat)
+stopifnot(require(lmtest))
+stopifnot(require(sandwich))
+coeftest(lm1, vcov(lm1, "HC2"))
+```
+
+This approach is naive in two ways. First it ignores the fact that we are making
+multiple comparisons: the familywise error rate (FWER) will be higher than the
+presumed  type one error level for each test. Second, it likely understates the
+number of comparisons we are actually interested in making.
+
+To reflect that fact that we are making multiple comparisons, we can adjust
+p-values from our tests to control the familywise error rate at $\alpha$ through
+either a single step (e.g. [Bonferroni
+correction](https://en.wikipedia.org/wiki/Bonferroni_correction)) or stepwise
+procedure (such as the [Holm
+correction](https://en.wikipedia.org/wiki/Holm%E2%80%93Bonferroni_method) or the
+[Benjamini-Hochber
+correction](https://en.wikipedia.org/wiki/False_discovery_rate#Benjamini.E2.80.93Hochberg_procedure).^[For
+more on such adjustments and multiple comparisons see EGAP's [10 Things you need
+to know about multiple
+comparisons](http://egap.org/methods-guides/10-things-you-need-know-about-multiple-comparisons)
+We see below that these procedures can lead us to different conclusions about
+the effectiveness of various treatments in our hypothetical study. Using the
+Bonferroni correction, only the baseline email with framing A is statistically
+significant. Using uniformly more powerful stepwise corrections, the baseline and
+baseline plus framing A significant at conventional levels. [MORE INTUITIVE
+EXPLANATIONS HERE. MAYBE TOO MANY CORRECTIONS.]
+
+
+```{r}
+# Get p-values but exclude intercept
+pvals <- coeftest(lm1, vcov(lm1, "HC2"))[2:4, 4]
+round(p.adjust(pvals, "none"), 3)
+round(p.adjust(pvals, "bonferroni"), 3)
+round(p.adjust(pvals, "holm"), 3)
+round(p.adjust(pvals, "hochberg"), 3)
+```
+
+Simply adjusting p-values from this linear model, however, ignores the fact that
+we are likely interested in other pairwise comparisons, such as the difference
+between simply receiving an email and receiving an email with framing A (or
+framing B). It also ignores potential correlations in the distribution of test
+statistics.
+
+Below we demonstrate how to implement a Tukey Honest Signficant Differences
+(HSD) test. The Tukey HSD test (sometimes called a Tukey range test or just a
+Tuke test) calculates adjusted p-values and simultaneous confidence intervals
+from a studentized range distribution *for all pairwise comparisons* in a model,
+taking into account the correlation of test statistics.
+
+The test statistic for any comparison between group $i$ and $j$:
+
+\[ t_{ij} = \frac{\bar{y_i}-\bar{y_j}}{s\sqrt{\frac{2}{n}}} \]
+
+Where, $\bar{y_i}$ and $\bar{y_j}$ are the means in groups $i$ and
+$j$, respectively,  $s$ is the pooled standard deviation and $n$ is the common
+sample size.
+
+The confidence interval for any difference is simply:
+
+\[ \left[
+	 \bar{y_i}-\bar{y_j}-u_{1-\alpha}s\sqrt{\frac{2}{n}};\bar{y_i}-\bar{y_j}+u_{1-\alpha}s\sqrt{\frac{2}{n}}\right]
+\]
+
+Where $u_{1-\alpha}$ denotes the $(1-\alpha)$-quantile of the multivariate
+t-distribution.
+
+
+We present an implementation of the Tukey HSD test using the `glht()` function
+from the `multcomp` package which offers more flexiblity than the
+`TukeyHSD` in the base `stats` package at the price of a slightly more complicated
+syntax.
+
+The first step is to fit an ANOVA model of the study
+
+```{r}
+stopifnot(require(multcomp))
+# ANOVA
+aovmod <- aov(Y~Z, dat)
+```
+
+Using the `glht()` function's `linfcnt` argument, we tell the function to
+conduct a Tukey test of all pairwise comparisons for our treatment indicator,
+$Z$.
+
+```{r}
+tukey_mc <- glht(aovmod, linfct = mcp(Z = "Tukey"))
+```
+
+We see that the baseline email plus framing A is statistically different from
+the control, the baseline only condition, and the baseline email with framing B.
+
+```{r}
+summary(tukey_mc)
+```
+
+
+We can plot the 95-percent family wise confidence intervals from these
+comparisons
+
+```{r}
+# Save default ploting parameters
+op <- par()
+# Add space to lefthand outer margin
+par(oma = c(1, 3, 0, 0))
+plot(tukey_mc)
+```
+
+And also obtain simultaneous confidence intervals at other levels of statistical
+significance using `confint()` function
+
+```{r}
+tukey_mc_90ci <- confint(tukey_mc, level = .90)
+plot(tukey_mc_90ci)
+# Restore defaults
+par(op)
+```
+
+Finally note that the p-values from the Tukey HSD test will tend to differ from
+a adjusted p-values corrected for the number of pairwise comparisons. [HOW IS
+THIS CORRECTION BEING MADE?]
+
+```{r}
+with(dat, pairwise.prop.test(table(Z, Y), p.adjust = "holm"))
+```
+
+# Challenges to Clear Interpretation of Experimental Comparisons
+
+# Attrition
+
+Attrition may occur because the researcher cannot obtain the outcome data, the
+researcher loses track of the subjects, the subjects refuse to cooperate, and
+many other reasons.  Attrition can be random, conditionally random, confined to
+a subgroup, or other (Gerber and Green, 2012, 220-230).
+
+## Missing Independent of Potential Outcomes (MIPO)
+
+If we suspect that our data is missing independent of potential outcomes, this
+type of attrition can be seen as random and should have no effect on outcomes.
+Therefore, we can directly estimate the ATE in our experiment without concern
+for bias.
+
+## Missing Independent of Potential Outcomes Given X (MIPO|X)
+
+If we suspect that our data is missing independent of potential outcomes given
+X, this type of attrition can be seen as random conditional on X, a
+pre-treatment covariate.  This conditionality suggests that within each subgroup
+of covariate X, our missing data is random.  We can have an unbiased estimate by
+taking the weighted average within each subgroup.
+
+If there is missing data within one subgroup, we could use inverse probability
+weighting to obtain the average effect, where we divide the outcome recorded for
+each subject without missing data by the inverse of the ratio of subjects
+treated without missing data in the subgroup to the total subjects treated in
+the subgroup.  We can then subtract the results of the control from the treats
+of the treated to obtain ATE.
+
+## Bounds
+
+If we are unsure about whether our missing data is random, we may place bounds
+on the treatment effect by filling in the missing data with extremely high or
+extremely low outcomes and estimating the ATE after filling in the missing data.
+We determine a range of outcomes for all subjects.  We fill in all of the
+missing data with the highest value in the range to estimate the upper bound
+ATE.  We fill in all of the missing data with the lowest value in the range to
+estimate the lower bound ATE.
+
+We now have some information that the true ATE lies within the upper and lower
+bounds.  However, the greater the rate of attrition, larger the difference
+between the bounds and the less informative the bounds will be.
+
+## Sensitivity Analyses
+
+
+# Covariates and Covariance Adjustment
+
+# Overly influential points
+
+# Issues with the field work or generation of random numbers
+
+# [Glossary of Terms](#glossary)
+
+Average treatment effect (ATE){#ATE}
+
+
+# [Appendix](#appendix)
