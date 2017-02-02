@@ -1,5 +1,5 @@
 ---
-title: SBST Standard Operating Procedures
+title: OES Standard Operating Procedures
 author: Jake Bowers, Paul Testa, Lula Chen, Nate Higgins
 date: '`r format(Sys.Date(), "%B %d, %Y")`'
 bibliography: sop.bib
@@ -31,15 +31,15 @@ output:
 ---
 
 This document contains a record of the current standard operating procedure
-(SOP) for the [Social and Behavioral Sciences Team](http://sbst.gov) (also known
-as the [Office of Evaluation Sciences in the General Services
-Administration](http://www.gsa.gov/portal/category/100270).^[This SOP is
+(SOP) for the [Office of Evaluation Sciences in the General Services
+Administration](https://oes.gsa.gov/).^[This SOP is
 directly inspired by the [Green, Lin and Coppock
 SOP](https://github.com/acoppock/Green-Lab-SOP). We did not directly fork that
 repository at this point although we copy from the ideas there and refer to that
 SOP often.]
 
-A standard operating procedure records decisions that we have made in the
+This standard operating procedure acts as our guide to experimental design and analysis; 
+it records decisions that we have made in the
 absence of pre-analysis plans, or in the context of circumstances unforeseen by
 our pre-analysis planning. This document is also provisional or a live document,
 in that it is more a way to record decisions we've taken than a way to advocate
@@ -59,7 +59,7 @@ Each section of this document will include if applicable:
    outputs from the function.
 3. A general example using simulated data to implement the tool in R (perhaps
    including some evaluation of the tool as compared to other possible choices).
-4. A specific example from SBST (if applicable) in which we implemented the
+4. A specific example from OES (if applicable) in which we implemented the
    given procedure.
 
 Throughout the document, we include links to the [Glossary](#glossary) and
