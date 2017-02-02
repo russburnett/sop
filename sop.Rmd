@@ -131,6 +131,9 @@ conducted and how the data were recorded by the agency.
 
 ```{r}
 library(RItools)
+
+# INSERT example using xBalance.
+
 ```
 
 
