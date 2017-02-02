@@ -1,0 +1,302 @@
+---
+title: "Note on Standard Errors"
+author: Jake Bowers, Paul Testa, Lula Chen, Nate Higgins
+date: '`r format(Sys.Date(), "%B %d, %Y")`'
+bibliography: sop.bib
+fontsize: 10pt
+geometry: margin=1in
+mainfont: "Crimson Text"
+graphics: yes
+header-includes:
+  - \usepackage[T1]{fontenc}
+  - \usepackage{textcomp}
+  - \usepackage{fontspec}
+  - \newfontfamily\themainfont[Ligatures=TeX]{Crimson Text}
+output:
+  html_document:
+    toc: true
+    number_sections: true
+    fig_caption: yes
+    fig_height: 4
+    fig_width: 4
+    code_folding: hide
+  pdf_document:
+    toc: true
+    number_sections: true
+    fig_caption: yes
+    fig_height: 4
+    fig_width: 4
+    latex_engine: xelatex
+    keep_tex: true
+---
+Standard errors and confidence intervals measure the precision and uncertainty of point estimates from experiments.  If we redo random assignment to each group in an experiment, how might the average treatment effect (ATE) change?  Standard errors and confidence intervals give us a range for the ATE and other point estimates we may have. 
+
+Our policy is to use the HC2 estimator to find standard errors in experimental research.  We show below that the HC2 estimator is more conservative and performs as well or better than other estimators.  We also  estimator that outperforms 
+
+When we estimate the ATE for every experiment, there is always a true standard error
+
+$$SE(\widehat{ATE})  =  \sqrt{\frac{1}{N-1} \frac{m \mathrm{VAR}(Y_{i,i \in C})}{n-m} + \frac{(N-m) \mathrm{VAR}(Y_{i,i \in T})}{m} + 2 \mathrm{COV}(Y_{i,i \in C},Y_{i,i \in T})}$$s
+
+where $m$ is the number assigned to treatment $N$ is the total number of subjects in the experiment, $Y_{i,i \in C}$ are observations from control and $Y_{i,i \in T}$ are observations from treatment. To calculate the true standard error, notice that we must know the potential outcomes and the covariance between potential outcomes, which we rarely know in reality [@gerber_field_2012]. 
+
+If we do not know the true standard error, is there a formula for estimating standard error that outperforms other equations in consistently estimating a standard error that is close to the true standard error?  
+
+We examine the difference in coverage and the difference in power between the common OLS estimator the HC2 estimator.  The OLS standard error estimator assumes that variance is homoskedastic while the HC2 estimator adjusts for variance that is heteroskedastic.  Errors in both are assumed to be independent.  We study each type of standard error with small, moderate, large sample sizes.  We also study the confidence intervals produced by each type of standard error.  
+
+The formula for estimating standard error in an OLS in matrix notation is
+
+$$ \widehat{SE}_{OLS} = \sqrt{\sigma^2 (X'X)^{-1}}$$
+
+where $\sigma^2$ is the variance of the ATE and X is a matrix of the explanatory variables, or in this case, assignment to treatment and control.  This standard error assume homoskedasticity in variance and independence between errors. 
+
+A second standard error is the Neyman standard error:
+
+$$ \sqrt{ \frac{\hat{\sigma^2}_{Y_T}}{m} + \frac{\hat{\sigma^2}_{Y_C}}{N-m}} $$
+
+The Neyman standard error is more conservative than the OLS standard error and takes the variances of the samples separately [@neyman_application_1923].
+
+However, what if we have even more heteroskedasticity in the variance?  If we remove the assumption of homoskedasticity, one estimator for standard error is the HC2 estimator. The formula for estimating the HC2 standard error in matrix notation is
+
+$$ \widehat{SE}_{HC2} = \sqrt{(X'X)^{-1}X' \Omega X (X'X)^{-1}}$$
+
+$\Omega$ is a matrix with the diagonal $(\omega_1, \omega_2, ..., \omega_n)$.  $\Omega$ for the HC2 estimator is $\omega_i = \frac{\hat{u}^2_i}{1-h_i}$ where $\hat{u}$ are residuals for element $i$ and $h_i$ is an element is the diagonal of the projection matrix that changes the observed outcome to its predicted value. In other words, HC2 estimator allows variance (and therefore standard error) to change, weighted by how much leverage that observed point has on its predicted value in OLS.  @lin_agnostic_2013 shows that the HC2 standard error estimator and the Neyman standard error are the same.  This result makes sense intuitively as we can imagine that $h$ for treatment and $h$ for control would be very different between treatment and control, but clustered and similar within treatment and control.  We would then have two different sample variances that result from treatment and control.  
+
+How well do different formulas for standard errors perform?  @samii_equivalencies_2012 shows that when the design is balanced, meaning that there are equal numbers in treatment and control, the OLS and HC2 standard errors yield the same results.  Using simulations, we compare the performance of OLS and HC2 standard errors for samples that are small, moderate, and large.
+
+# OLS vs. HC2 Standard Errors and Confidence Intervals - Small Sample
+We compare OLS and HC2 standard errors where $N = 20$. The code below shows how to simulate a small N experiment, find the true standard error, and find OLS and HC2 standard errors and percentile confidence intervals. 
+
+```{r, echo=TRUE, eval=TRUE, results = 'hide'}
+## 1. Simulate data for small sample.
+require(mosaic)
+require(sandwich)
+
+## Design aspects
+set.seed(1128) #set seed for replicability
+N_s1 <- 10
+N_s0 <- 10
+N_s <- N_s1 + N_s0
+tc_s <- c(rep(1, N_s1), rep(0, N_s0))  # treatment/control
+
+## Data generating process
+tau <- 0.25
+y0_s <- rnorm(N_s)               # potential outcomes to control
+y1_s <- y0_s * sqrt(2) + tau   # potential outcomes to treatment, twice the    variance of y0  
+tau_si <- y1_s - y0_s            # unit level treatment effects
+
+## Run the experiment once
+Zrealized_s <- shuffle(tc_s) 
+Yobs_s <- Zrealized_s * y1_s + (1 - Zrealized_s) * y0_s
+
+## Summary of true data
+V_s <- var(cbind(y0_s,y1_s))
+varc_s <- V_s[1,1]
+vart_s <- V_s[2,2]
+covtc_s <- V_s[1,2]
+n_s <- sum(Zrealized_s)
+m_s <- N_s-n_s
+
+##2. Find true standard error in small sample
+varestATE_s <- ((N_s-n_s)/(N_s-1)) * (vart_s/n_s) + ((N_s-m_s)/(N_s-1)) * (varc_s/m_s) + (2/(N_s-1)) * covtc_s
+(seEstATE_s <- sqrt(varestATE_s))
+
+##3. Find feasible version of standard error in small sample (where we do not observe the potential outcomes and do not have the covariance)
+varYc_s <- var(Yobs_s[Zrealized_s == 0])
+varYt_s <- var(Yobs_s[Zrealized_s == 1])
+fvarestATE_s <- (N_s/(N_s-1)) * ( (varYt_s/n_s) + (varYc_s/m_s) )
+(estSEEstATE_s <- sqrt(fvarestATE_s))
+
+##4. OLS standard error
+olsseEstATE_s <- lm(Yobs_s~Zrealized_s) ## to check residuals without constant in the regression
+summary(olsseEstATE_s) ## compare to OLS standard error from lm() estimate
+(ols_s <- coef(summary(olsseEstATE_s))["Zrealized_s", "Std. Error"])
+
+##4a. OLS Confidence Intervals
+estATE_s <- coef(olsseEstATE_s)["Zrealized_s"]
+critval_s <- qt(0.975, df = 9)  ## Critical value for 95% CI using percentile method
+me_ols_s <- critval_s * ols_s ## Critical value * standard error
+ci_ols_s = c(estATE_s - me_ols_s, estATE_s + me_ols_s) ## 
+names(ci_ols_s) = c('lower','upper')
+print(ci_ols_s) ## OLS confidence intervals
+
+##5. HC2 Standard Error
+(hc2_s <- sqrt(diag(vcovHC(olsseEstATE_s, type = "HC2")))["Zrealized_s"])
+
+##5a. HC2 Confidence Interval
+me_hc2_s <- critval_s * hc2_s
+ci_hc2_s = c(estATE_s - me_hc2_s, estATE_s + me_hc2_s)
+names(ci_hc2_s) = c('lower','upper')
+print(ci_hc2_s) ## HC2 confidence interval
+```
+
+```{r, eval = TRUE, echo = TRUE}
+se_s <- matrix(NA, 1, 3) 
+colnames(se_s) <- c("TRUE", "OLS","HC2")
+rownames(se_s) <- ("SE")
+se_s[1,1] <- seEstATE_s 
+se_s[1,2] <- ols_s
+se_s[1,3] <- hc2_s
+print(se_s)
+```
+
+```{r, eval=TRUE, echo=TRUE}
+ci_s <- rbind(ci_ols_s, ci_hc2_s)
+rownames(ci_s) <- c("OLS", "HC2")
+print(ci_s)
+```
+
+# OLS vs. HC2 Standard Errors and Confidence Intervals - Moderate Sample
+We compare OLS and HC2 standard errors where $N = 100$. The code below shows how to simulate a moderate N experiment, find the true standard error, and find OLS and HC2 standard errors and percentile confidence intervals. 
+
+```{r, echo=TRUE, eval=TRUE, results = 'hide'}
+## 1. Simulate data for moderate sample.
+N_1 <- 50
+N_0 <- 50
+N <- N_1 + N_0
+tc  <- c(rep(1, N_1), rep(0, N_0))  # treatment/control
+
+## Data generating process
+tau <- 0.25
+y0 <- rnorm(N)               # potential outcomes to control
+y1 <- y0 * sqrt(2) + tau   # potential outcomes to treatment, twice the    variance of y0  
+tau_i <- y1 - y0            # unit level treatment effects
+
+## Run the experiment once
+Zrealized <- shuffle(tc) 
+Yobs <- Zrealized * y1 + (1 - Zrealized) * y0
+
+V <- var(cbind(y0,y1))
+varc <- V[1,1]
+vart <- V[2,2]
+covtc <- V[1,2]
+n <- sum(Zrealized)
+m <- N-n
+
+##2. Find true standard error in moderate sample
+varestATE <- ((N-n)/(N-1)) * (vart/n) + ((N-m)/(N-1)) * (varc/m) + (2/(N-1)) * covtc
+(seEstATE <- sqrt(varestATE))
+
+##3. Find feasible version of standard error in moderate sample (where we do not observe the potential outcomes and do not have the covariance)
+Yobs <- Zrealized*y1+(1-Zrealized)*y0
+varYc <- var(Yobs[Zrealized == 0])
+varYt <- var(Yobs[Zrealized == 1])
+fvarestATE <- (N/(N-1)) * ( (varYt/n) + (varYc/m) )
+(estSEEstATE <- sqrt(fvarestATE))
+
+##4. OLS standard error
+olsseEstATE <- lm(Yobs~Zrealized) ## to check residuals without constant in the regression
+summary(olsseEstATE) ## compare to OLS standard error from lm() estimate
+(ols <- coef(summary(olsseEstATE))["Zrealized", "Std. Error"]) ##OLS standard error
+
+##4a. OLS Confidence Intervals
+estATE <- coef(olsseEstATE)["Zrealized"]
+critval <- qt(0.975, df = 49)  ## Critical value for 95% CI using percentile method
+me_ols <- critval * ols ## Critical value * standard error
+ci_ols = c(estATE - me_ols, estATE + me_ols) ## 
+names(ci_ols) = c('lower','upper')
+print(ci_ols) ## OLS confidence intervals
+
+##5. HC2 Standard Error
+(hc2 <- sqrt(diag(vcovHC(olsseEstATE, type = "HC2")))["Zrealized"]) ## HC2 standard errors
+
+##5a. HC2 Confidence Interval
+me_hc2 <- critval * hc2
+ci_hc2 = c(estATE - me_hc2, estATE + me_hc2)
+names(ci_hc2) = c('lower','upper')
+print(ci_hc2) ## HC2 confidence interval
+```
+
+```{r, eval = TRUE, echo = TRUE}
+se <- matrix(NA, 1, 3) 
+colnames(se) <- c("TRUE", "OLS","HC2")
+rownames(se) <- ("SE")
+se[1,1] <- seEstATE 
+se[1,2] <- ols
+se[1,3] <- hc2
+print(se)
+```
+
+```{r, eval=TRUE, echo=TRUE}
+ci <- rbind(ci_ols, ci_hc2)
+rownames(ci) <- c("OLS", "HC2")
+print(ci)
+```
+
+# OLS vs. HC2 Standard Errors and Confidence Intervals - Large Sample
+We compare OLS and HC2 standard errors where $N = 10000$.  The code below shows how to simulate a large N experiment, find the true standard error, and find OLS and HC2 standard errors and percentile confidence intervals. 
+
+```{r, echo=TRUE, eval=TRUE, results = 'hide'}
+
+## 1. Simulate data for large sample.
+N_l1 <- 5000
+N_l0 <- 5000
+N_l <- N_l1 + N_l0
+tc_l <- c(rep(1, N_l1), rep(0, N_l0))  # treatment/control
+
+## Data generating process
+tau <- 0.25
+y0_l <- rnorm(N_l)               # potential outcomes to control
+y1_l <- y0_l * sqrt(2) + tau   # potential outcomes to treatment, twice the    variance of y0  
+tau_li <- y1_l - y0_l            # unit level treatment effects
+
+## Run the experiment once
+Zrealized_l <- shuffle(tc_l) 
+Yobs_l <- Zrealized_l * y1_l + (1 - Zrealized_l) * y0_l
+
+V_l <- var(cbind(y0_l,y1_l))
+varc_l <- V_l[1,1]
+vart_l <- V_l[2,2]
+covtc_l <- V_l[1,2]
+n_l <- sum(Zrealized_l)
+m_l <- N_l-n_l
+
+##2. Find true standard error in large sample
+varestATE_l <- ((N_l-n_l)/(N_l-1)) * (vart_l/n_l) + ((N_l-m_l)/(N_l-1)) * (varc_l/m_l) + (2/(N_l-1)) * covtc_l
+(seEstATE_l <- sqrt(varestATE_l))
+
+##3. Find feasible version of standard error in large sample (where we do not observe the potential outcomes and do not have the covariance)
+Yobs_l <- Zrealized_l*y1_l+(1-Zrealized_l)*y0_l
+varYc_l <- var(Yobs_l[Zrealized_l == 0])
+varYt_l <- var(Yobs_l[Zrealized_l == 1])
+fvarestATE_l <- (N_l/(N_l-1)) * ( (varYt_l/n_l) + (varYc_l/m_l) )
+(estSEEstATE_l <- sqrt(fvarestATE_l))
+
+##4. OLS standard error
+olsseEstATE_l <- lm(Yobs_l~Zrealized_l) ## to check residuals without constant in the regression
+summary(olsseEstATE_l) ## compare to OLS standard error from lm() estimate
+(ols_l <- coef(summary(olsseEstATE_l))["Zrealized_l", "Std. Error"]) ##OLS standard error
+
+##4a. OLS Confidence Intervals
+estATE_l <- coef(olsseEstATE_l)["Zrealized_l"]
+critval_l <- qt(0.975, df = 4999)  ## Critical value for 95% CI using percentile method
+me_ols_l <- critval_l * ols_l ## Critical value * standard error
+ci_ols_l = c(estATE_l - me_ols_l, estATE_l + me_ols_l) ## 
+names(ci_ols_l) = c('lower','upper')
+print(ci_ols_l) ## OLS confidence intervals
+
+##5. HC2 Standard Error
+(hc2_l <- sqrt(diag(vcovHC(olsseEstATE_l, type = "HC2")))["Zrealized_l"]) ## HC2 standard errors
+
+##5a. HC2 Confidence Interval
+me_hc2_l <- critval_l * hc2_l
+ci_hc2_l = c(estATE_l - me_hc2_l, estATE_l + me_hc2_l)
+names(ci_hc2_l) = c('lower','upper')
+print(ci_hc2_l) ## HC2 confidence interval
+```
+
+```{r, eval = TRUE, echo = TRUE}
+se_l <- matrix(NA, 1, 3) 
+colnames(se_l) <- c("TRUE", "OLS","HC2")
+rownames(se_l) <- ("SE")
+se_l[1,1] <- seEstATE_l 
+se_l[1,2] <- ols_l
+se_l[1,3] <- hc2_l
+print(se_l)
+```
+
+```{r, eval=TRUE, echo=TRUE}
+ci_l <- rbind(ci_ols_l, ci_hc2_l)
+rownames(ci_l) <- c("OLS", "HC2")
+print(ci_l)
+```
+
