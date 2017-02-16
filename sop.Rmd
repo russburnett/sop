@@ -1,6 +1,6 @@
 ---
 title: OES Standard Operating Procedures
-author: Jake Bowers, Paul Testa, Lula Chen, Nate Higgins
+author: Jake Bowers, Paul Testa, Lula Chen, Nate Higgins, Russ Burnett
 date: '`r format(Sys.Date(), "%B %d, %Y")`'
 bibliography: sop.bib
 fontsize: 10pt
